@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>イベントマーカー付き ラップ ストップウォッチ</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-900 min-h-screen text-white">
+  <header class="bg-gray-800 border-b border-gray-700 px-6 py-4">
+    <h1 class="text-xl font-bold">イベントマーカー付き ラップ ストップウォッチ</h1>
+    <p class="text-sm text-gray-400 mt-1">Space=スタート/ストップ・L=ラップ・E=イベント記録・R=リセット</p>
+  </header>
+
+  <main class="max-w-4xl mx-auto px-4 py-6 flex flex-col gap-6">
+
+    <!-- タイマー表示 -->
+    <div class="bg-gray-800 rounded-2xl p-8 flex flex-col items-center gap-6">
+      <div id="display" class="font-mono text-6xl font-bold tabular-nums tracking-widest text-white" aria-live="polite" aria-label="経過時間">00:00.000</div>
+
+      <!-- コントロール -->
+      <div class="flex gap-3 flex-wrap justify-center">
+        <button id="btn-start-stop"
+          class="px-8 py-3 rounded-xl font-semibold text-lg focus:outline-none focus:ring-4 focus:ring-green-400 bg-green-500 hover:bg-green-400 text-white transition-colors"
+          aria-label="スタート（Spaceキー）">
+          スタート
+        </button>
+        <button id="btn-lap"
+          class="px-6 py-3 rounded-xl font-semibold text-lg focus:outline-none focus:ring-4 focus:ring-blue-400 bg-blue-600 hover:bg-blue-500 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-label="ラップ記録（Lキー）" disabled>
+          ラップ
+        </button>
+        <button id="btn-event"
+          class="px-6 py-3 rounded-xl font-semibold text-lg focus:outline-none focus:ring-4 focus:ring-yellow-400 bg-yellow-600 hover:bg-yellow-500 text-white transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          aria-label="イベント記録（Eキー）" disabled>
+          イベント
+        </button>
+        <button id="btn-reset"
+          class="px-6 py-3 rounded-xl font-semibold text-lg focus:outline-none focus:ring-4 focus:ring-gray-400 bg-gray-600 hover:bg-gray-500 text-white transition-colors"
+          aria-label="リセット（Rキー）">
+          リセット
+        </button>
+      </div>
+
+      <!-- イベントラベル入力 -->
+      <div class="flex gap-2 items-center w-full max-w-sm">
+        <label class="text-sm text-gray-400 whitespace-nowrap" for="event-label">イベントラベル:</label>
+        <input id="event-label" type="text" maxlength="40" class="flex-1 bg-gray-700 border border-gray-600 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500 text-white placeholder-gray-500" placeholder="例: ゴール通過" />
+      </div>
+    </div>
+
+    <!-- ラップ/イベントテーブル -->
+    <div class="bg-gray-800 rounded-2xl p-5 flex flex-col gap-4">
+      <div class="flex items-center justify-between">
+        <h2 class="font-semibold text-gray-200">記録一覧</h2>
+        <div class="flex gap-2">
+          <button id="btn-csv" class="text-xs px-3 py-1 bg-gray-700 text-gray-300 rounded hover:bg-gray-600 focus:outline-none focus:ring-2 focus:ring-gray-400" aria-label="CSV出力">CSV出力</button>
+          <button id="btn-clear-records" class="text-xs px-3 py-1 bg-red-900 text-red-300 rounded hover:bg-red-800 focus:outline-none focus:ring-2 focus:ring-red-400" aria-label="記録をクリア">クリア</button>
+        </div>
+      </div>
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm border-collapse" role="table" aria-label="ラップ・イベント記録テーブル">
+          <thead>
+            <tr class="text-gray-400 text-xs border-b border-gray-700">
+              <th class="px-3 py-2 text-left w-8" scope="col">#</th>
+              <th class="px-3 py-2 text-left" scope="col">種別</th>
+              <th class="px-3 py-2 text-left" scope="col">ラベル</th>
+              <th class="px-3 py-2 text-right" scope="col">区間</th>
+              <th class="px-3 py-2 text-right" scope="col">累計</th>
+            </tr>
+          </thead>
+          <tbody id="records-tbody">
+            <tr id="empty-row">
+              <td colspan="5" class="text-center text-gray-500 py-8">記録なし</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div id="stats-row" class="hidden grid grid-cols-3 gap-3 text-sm">
+        <div class="bg-gray-700 rounded-lg p-3 flex flex-col gap-1">
+          <p class="text-xs text-gray-400">ラップ数</p>
+          <p id="stat-laps" class="font-bold text-white">0</p>
+        </div>
+        <div class="bg-gray-700 rounded-lg p-3 flex flex-col gap-1">
+          <p class="text-xs text-gray-400">最速ラップ</p>
+          <p id="stat-best" class="font-bold text-green-400">—</p>
+        </div>
+        <div class="bg-gray-700 rounded-lg p-3 flex flex-col gap-1">
+          <p class="text-xs text-gray-400">最遅ラップ</p>
+          <p id="stat-worst" class="font-bold text-red-400">—</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const STORAGE_KEY = 'stopwatch-v1';
+
+    let running = false;
+    let startTime = 0;
+    let elapsed = 0;         // ms when paused
+    let rafId = null;
+    let records = [];
+    let lapStartMs = 0;      // ms at last lap/event start
+    let recordCounter = 0;
+
+    function fmtMs(ms) {
+      const totalMs = Math.max(0, ms);
+      const minutes = Math.floor(totalMs / 60000);
+      const seconds = Math.floor((totalMs % 60000) / 1000);
+      const millis = totalMs % 1000;
+      return String(minutes).padStart(2, '0') + ':' +
+             String(seconds).padStart(2, '0') + '.' +
+             String(millis).padStart(3, '0');
+    }
+
+    function currentMs() {
+      return running ? (elapsed + (Date.now() - startTime)) : elapsed;
+    }
+
+    function updateDisplay() {
+      document.getElementById('display').textContent = fmtMs(currentMs());
+    }
+
+    function tick() {
+      updateDisplay();
+      if (running) rafId = requestAnimationFrame(tick);
+    }
+
+    function start() {
+      if (running) return;
+      running = true;
+      startTime = Date.now();
+      if (lapStartMs === 0 && elapsed === 0) lapStartMs = 0;
+      document.getElementById('btn-start-stop').textContent = 'ストップ';
+      document.getElementById('btn-start-stop').className = document.getElementById('btn-start-stop').className.replace('bg-green-500 hover:bg-green-400', 'bg-red-500 hover:bg-red-400');
+      document.getElementById('btn-start-stop').className = document.getElementById('btn-start-stop').className.replace('focus:ring-green-400', 'focus:ring-red-400');
+      document.getElementById('btn-lap').disabled = false;
+      document.getElementById('btn-event').disabled = false;
+      rafId = requestAnimationFrame(tick);
+    }
+
+    function stop() {
+      if (!running) return;
+      running = false;
+      elapsed += Date.now() - startTime;
+      cancelAnimationFrame(rafId);
+      updateDisplay();
+      document.getElementById('btn-start-stop').textContent = 'スタート';
+      document.getElementById('btn-start-stop').className = document.getElementById('btn-start-stop').className.replace('bg-red-500 hover:bg-red-400', 'bg-green-500 hover:bg-green-400');
+      document.getElementById('btn-start-stop').className = document.getElementById('btn-start-stop').className.replace('focus:ring-red-400', 'focus:ring-green-400');
+    }
+
+    function reset() {
+      stop();
+      running = false;
+      elapsed = 0;
+      lapStartMs = 0;
+      recordCounter = 0;
+      updateDisplay();
+      document.getElementById('btn-lap').disabled = true;
+      document.getElementById('btn-event').disabled = true;
+    }
+
+    function addRecord(type) {
+      const now = currentMs();
+      const interval = now - lapStartMs;
+      recordCounter++;
+      const label = type === 'event'
+        ? (document.getElementById('event-label').value.trim() || 'イベント')
+        : 'ラップ ' + records.filter(r => r.type === 'lap').length + 1;
+      const rec = {
+        id: recordCounter,
+        type,
+        label,
+        interval,
+        total: now,
+        ts: Date.now()
+      };
+      records.push(rec);
+      if (type === 'lap') lapStartMs = now;
+      renderRecords();
+      save();
+    }
+
+    function renderRecords() {
+      const tbody = document.getElementById('records-tbody');
+      while (tbody.firstChild) tbody.removeChild(tbody.firstChild);
+
+      if (records.length === 0) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 5;
+        td.textContent = '記録なし';
+        td.className = 'text-center text-gray-500 py-8';
+        tr.appendChild(td);
+        tbody.appendChild(tr);
+        document.getElementById('stats-row').classList.add('hidden');
+        return;
+      }
+
+      const laps = records.filter(r => r.type === 'lap');
+      const lapIntervals = laps.map(r => r.interval);
+      const bestLap = lapIntervals.length > 0 ? Math.min(...lapIntervals) : null;
+      const worstLap = lapIntervals.length > 0 ? Math.max(...lapIntervals) : null;
+
+      [...records].reverse().forEach((rec, _i) => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-gray-700 hover:bg-gray-700 transition-colors';
+
+        const isBest = rec.type === 'lap' && rec.interval === bestLap && laps.length > 1;
+        const isWorst = rec.type === 'lap' && rec.interval === worstLap && laps.length > 1;
+
+        const numTd = document.createElement('td');
+        numTd.textContent = rec.id;
+        numTd.className = 'px-3 py-2 text-gray-400 text-xs';
+        tr.appendChild(numTd);
+
+        const typeTd = document.createElement('td');
+        typeTd.className = 'px-3 py-2';
+        const badge = document.createElement('span');
+        badge.textContent = rec.type === 'lap' ? 'ラップ' : 'イベント';
+        badge.className = 'text-xs px-2 py-0.5 rounded-full ' +
+          (rec.type === 'lap' ? 'bg-blue-900 text-blue-300' : 'bg-yellow-900 text-yellow-300');
+        typeTd.appendChild(badge);
+        tr.appendChild(typeTd);
+
+        const labelTd = document.createElement('td');
+        labelTd.textContent = rec.label;
+        labelTd.className = 'px-3 py-2 text-gray-200';
+        tr.appendChild(labelTd);
+
+        const intervalTd = document.createElement('td');
+        intervalTd.textContent = fmtMs(rec.interval);
+        intervalTd.className = 'px-3 py-2 text-right font-mono text-sm ' +
+          (isBest ? 'text-green-400 font-bold' : isWorst ? 'text-red-400' : 'text-gray-300');
+        tr.appendChild(intervalTd);
+
+        const totalTd = document.createElement('td');
+        totalTd.textContent = fmtMs(rec.total);
+        totalTd.className = 'px-3 py-2 text-right font-mono text-sm text-gray-400';
+        tr.appendChild(totalTd);
+
+        tbody.appendChild(tr);
+      });
+
+      // stats
+      document.getElementById('stats-row').classList.remove('hidden');
+      document.getElementById('stat-laps').textContent = laps.length;
+      document.getElementById('stat-best').textContent = bestLap !== null ? fmtMs(bestLap) : '—';
+      document.getElementById('stat-worst').textContent = worstLap !== null ? fmtMs(worstLap) : '—';
+    }
+
+    function exportCSV() {
+      if (records.length === 0) return;
+      const rows = [['#', '種別', 'ラベル', '区間', '累計']];
+      records.forEach(r => {
+        rows.push([r.id, r.type === 'lap' ? 'ラップ' : 'イベント', r.label, fmtMs(r.interval), fmtMs(r.total)]);
+      });
+      const csv = rows.map(r => r.map(v => '"' + String(v).replace(/"/g, '""') + '"').join(',')).join('\n');
+      const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'stopwatch-' + new Date().toISOString().slice(0, 10) + '.csv';
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function save() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({ records, elapsed, recordCounter, lapStartMs }));
+    }
+
+    // buttons
+    document.getElementById('btn-start-stop').addEventListener('click', () => {
+      if (running) stop(); else start();
+    });
+    document.getElementById('btn-lap').addEventListener('click', () => {
+      if (!running) return;
+      addRecord('lap');
+    });
+    document.getElementById('btn-event').addEventListener('click', () => {
+      if (!running) return;
+      addRecord('event');
+    });
+    document.getElementById('btn-reset').addEventListener('click', () => {
+      reset();
+      records = [];
+      renderRecords();
+      save();
+    });
+    document.getElementById('btn-csv').addEventListener('click', exportCSV);
+    document.getElementById('btn-clear-records').addEventListener('click', () => {
+      records = [];
+      recordCounter = 0;
+      renderRecords();
+      save();
+    });
+
+    // keyboard
+    document.addEventListener('keydown', e => {
+      // Don't trigger when typing in input
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+        if (e.key === 'Escape') e.target.blur();
+        return;
+      }
+      switch (e.code) {
+        case 'Space':
+          e.preventDefault();
+          if (running) stop(); else start();
+          break;
+        case 'KeyL':
+          if (running) addRecord('lap');
+          break;
+        case 'KeyE':
+          if (running) addRecord('event');
+          break;
+        case 'KeyR':
+          reset();
+          records = [];
+          renderRecords();
+          save();
+          break;
+      }
+    });
+
+    // restore
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved) {
+      try {
+        const data = JSON.parse(saved);
+        records = data.records || [];
+        elapsed = data.elapsed || 0;
+        recordCounter = data.recordCounter || 0;
+        lapStartMs = data.lapStartMs || 0;
+        updateDisplay();
+        renderRecords();
+      } catch {}
+    }
+  </script>
+</body>
+</html>
